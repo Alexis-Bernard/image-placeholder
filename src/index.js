@@ -63,6 +63,29 @@ const getColor = (word) => {
     : baseFontColor;
 };
 
+/**
+ * Draw a word on the canvas
+ * @param {CanvasRenderingContext2D} context - The context of the canvas
+ * @param {string} word - The word to draw
+ * @param {number} x - The x position of the word
+ * @param {number} y - The y position of the word
+ * @returns {number} The width of the word
+ */
+const drawWord = (context, word, x, y) => {
+  if (word.length > 1 && word.endsWith('!')) {
+    word = word.substring(0, word.length - 1);
+
+    const textSize = drawWord(context, word, x, y);
+    return textSize + drawWord(context, '!', x + textSize, y);
+  }
+
+  context.textAlign = 'left';
+  context.fillStyle = getColor(word);
+  context.fillText(word, x, y);
+
+  return context.measureText(`${word} `).width;
+};
+
 // Create a route for the image
 app.get('/review', async (req, res) => {
   try {
@@ -147,10 +170,7 @@ app.get('/review', async (req, res) => {
 
       // Draw the text
       line.split(' ').forEach((word) => {
-        context.textAlign = 'left';
-        context.fillStyle = getColor(word);
-        context.fillText(word, x, y);
-        x += context.measureText(`${word} `).width;
+        x += drawWord(context, word, x, y);
       });
 
       // Increment the y position
