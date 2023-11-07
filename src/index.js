@@ -1,5 +1,6 @@
 const express = require('express');
 const { registerFont, createCanvas } = require('canvas');
+const { CanvasEmoji } = require('canvas-emoji');
 const levenshtein = require('fast-levenshtein');
 const { readFromCsv } = require('./utils');
 
@@ -71,17 +72,25 @@ const getColor = (word) => {
  * @param {number} y - The y position of the word
  * @returns {number} The width of the word
  */
-const drawWord = (context, word, x, y) => {
+const drawWord = (context, word, x, y, fontSize) => {
   if (word.length > 1 && word.endsWith('!')) {
     word = word.substring(0, word.length - 1);
 
-    const textSize = drawWord(context, word, x, y);
-    return textSize + drawWord(context, '!', x + textSize, y);
+    const textSize = drawWord(context, word, x, y, fontSize);
+    return textSize + drawWord(context, '!', x + textSize, y, fontSize);
   }
 
   context.textAlign = 'left';
   context.fillStyle = getColor(word);
-  context.fillText(word, x, y);
+
+  const canvasEmoji = new CanvasEmoji(context);
+  canvasEmoji.drawPngReplaceEmoji({
+    text: word,
+    x,
+    y,
+    emojiW: fontSize,
+    emojiH: fontSize,
+  });
 
   return context.measureText(`${word} `).width;
 };
@@ -170,7 +179,7 @@ app.get('/review', async (req, res) => {
 
       // Draw the text
       line.split(' ').forEach((word) => {
-        x += drawWord(context, word, x, y);
+        x += drawWord(context, word, x, y, fontSize);
       });
 
       // Increment the y position
