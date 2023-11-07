@@ -54,7 +54,11 @@ const getColor = (word) => {
   }
 
   // Check if the word is in the colored word list
-  return specialWordList.some((coloredWord) => levenshtein.get(word, coloredWord, { useCollator: true }) <= 2)
+  return specialWordList.some((specialWord) =>
+    specialWord.length > 3
+      ? levenshtein.get(word, specialWord, { useCollator: true }) <= 2
+      : word.toLowerCase() === specialWord.toLowerCase(),
+  )
     ? specialWordFontColor
     : baseFontColor;
 };
