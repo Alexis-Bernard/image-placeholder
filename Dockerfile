@@ -1,5 +1,5 @@
 # Set the Node.js version to use.
-ARG NODE_VERSION=16.20.1
+ARG NODE_VERSION=18.17.0
 
 # Use the official Node.js image as the base image.
 FROM node:${NODE_VERSION}-alpine
