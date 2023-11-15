@@ -2,7 +2,6 @@ const express = require('express');
 const { registerFont, createCanvas } = require('canvas');
 const { CanvasEmoji } = require('canvas-emoji');
 const levenshtein = require('fast-levenshtein');
-const { readFromCsv } = require('./utils');
 
 // Load the environment variables
 require('dotenv').config();
@@ -26,7 +25,6 @@ const specialWordList = process.env.SPECIAL_WORD_LIST?.split(',') || [];
 /**
  * Variables to calculate the image
  */
-const dataToDisplay = [];
 const ratio = 1275 / 362;
 const canvasHeight = canvasWidth / ratio;
 const ratios = {
@@ -96,27 +94,16 @@ const drawWord = (context, word, x, y, fontSize) => {
 };
 
 // Create a route for the image
-app.get('/review', async (req, res) => {
+app.get('/image/:text', async (req, res) => {
   try {
-    console.log('Request received on /review');
-
-    // Check if the data is already loaded
-    if (!dataToDisplay.length) {
-      console.log('Reading data from CSV');
-
-      const data = await readFromCsv('data/reviews.csv');
-
-      console.log(`Found ${data.length} reviews`);
-
-      dataToDisplay.push(...data);
-    }
+    console.log('Request received on /image');
 
     // Instantiate the canvas object
     const canvas = createCanvas(canvasWidth, canvasHeight);
     const context = canvas.getContext('2d');
 
-    // Get a text randomly from the data
-    let { text } = dataToDisplay[Math.floor(Math.random() * dataToDisplay.length)];
+    // Get the text from the request
+    let { text } = req.params;
 
     // Initialize the array of splitted lines
     const splittedLines = [];

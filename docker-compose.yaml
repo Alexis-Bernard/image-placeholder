@@ -8,5 +8,3 @@ services:
     restart: always
     environment:
       - SPECIAL_WORD_LIST=
-    volumes:
-      - ./data/reviews.csv:/usr/src/app/data/reviews.csv
