@@ -2,7 +2,6 @@ const express = require('express');
 const { registerFont, createCanvas } = require('canvas');
 const { CanvasEmoji } = require('canvas-emoji');
 const levenshtein = require('fast-levenshtein');
-const { readFromCsv } = require('./utils');
 
 // Load the environment variables
 require('dotenv').config();
@@ -17,8 +16,7 @@ const app = express();
  * Variables to ajdust the image
  */
 const canvasWidth = parseInt(process.env.CANVAS_WIDTH) || 1275;
-const maxLineLength = parseInt(process.env.MAX_LINE_LENGTH) || 100;
-const maxFontSize = parseInt(process.env.MAX_FONT_SIZE) || 100;
+const maxFontSize = parseInt(process.env.MAX_FONT_SIZE) || 200;
 const baseFontColor = process.env.BASE_FONT_COLOR || '#fff';
 const specialWordFontColor = process.env.SPECIAL_WORD_FONT_COLOR || '#FB7417';
 const specialWordList = process.env.SPECIAL_WORD_LIST?.split(',') || [];
@@ -26,7 +24,6 @@ const specialWordList = process.env.SPECIAL_WORD_LIST?.split(',') || [];
 /**
  * Variables to calculate the image
  */
-const dataToDisplay = [];
 const ratio = 1275 / 362;
 const canvasHeight = canvasWidth / ratio;
 const ratios = {
@@ -95,79 +92,162 @@ const drawWord = (context, word, x, y, fontSize) => {
   return context.measureText(`${word} `).width;
 };
 
-// Create a route for the image
-app.get('/review', async (req, res) => {
-  try {
-    console.log('Request received on /review');
+/**
+ * Compute the font size to use for the text to fit the canvas. The font will be automatically set in the context.
+ * @param {string} text - The text to display
+ * @param {CanvasRenderingContext2D} context - The context of the canvas to draw on
+ * @returns
+ */
+const computeFontSize = (text) => {
+  // Create a new canvas to compute the font size
+  const canvas = createCanvas(canvasWidth, canvasHeight);
+  const context = canvas.getContext('2d');
 
-    // Check if the data is already loaded
-    if (!dataToDisplay.length) {
-      console.log('Reading data from CSV');
+  // Set the default font and font size
+  context.font = getFont();
 
-      const data = await readFromCsv('data/reviews.csv');
+  // Calculate the width of the text
+  let { width: textWidth, actualBoundingBoxDescent, actualBoundingBoxAscent } = context.measureText(text);
 
-      console.log(`Found ${data.length} reviews`);
+  // Initialize the dichotomy
+  const dichotomy = {
+    min: 0,
+    max: maxFontSize,
+  };
 
-      dataToDisplay.push(...data);
+  // Decrease the font size until the text fits the canvas
+  do {
+    // Compute the new font size
+    const newFontSize = Math.floor((dichotomy.min + dichotomy.max) / 2);
+
+    // Set the new font size
+    context.font = getFont(newFontSize);
+
+    // Calculate the width of the text
+    ({ width: textWidth, actualBoundingBoxDescent, actualBoundingBoxAscent } = context.measureText(text));
+
+    // Update the dichotomy
+    if (textWidth > canvasWidth || actualBoundingBoxDescent + actualBoundingBoxAscent > canvasHeight) {
+      console.log('Decrease font size');
+      dichotomy.max = newFontSize;
+    } else {
+      console.log('Increase font size');
+      dichotomy.min = newFontSize;
     }
+  } while (dichotomy.max - dichotomy.min > 1);
+
+  return dichotomy.min;
+};
+
+const splitLines = (text, maxLineLength) => {
+  const lines = [];
+
+  // Split the lines who exceeds the max line length
+  text.split('\n').forEach((line) => {
+    while (line.length > maxLineLength) {
+      let pos = line.substring(0, maxLineLength).lastIndexOf(' ');
+      pos = pos <= 0 ? maxLineLength : pos;
+
+      lines.push(line.substring(0, pos));
+
+      let i = line.indexOf(' ', pos) + 1;
+      if (i < pos || i > pos + maxLineLength) {
+        i = pos;
+      }
+      line = line.substring(i);
+    }
+
+    lines.push(line);
+  });
+
+  return lines;
+};
+
+const computeLineHeight = (lines, textDetails) => {
+  // Calculate the line height
+  const multiplier = ratios[lines.length] || 0.7 / lines.length ** 1.5 + 1;
+  const lineHeight =
+    ((textDetails.actualBoundingBoxDescent + textDetails.actualBoundingBoxAscent) / lines.length) * multiplier;
+
+  return lineHeight;
+};
+
+const getLongestLineLength = (lines) => lines.reduce((max, line) => (line.length > max ? line.length : max), 0);
+
+// Create a route for the image
+app.get('/image/:text', async (req, res) => {
+  try {
+    console.log('Request received on /image');
 
     // Instantiate the canvas object
     const canvas = createCanvas(canvasWidth, canvasHeight);
     const context = canvas.getContext('2d');
 
-    // Get a text randomly from the data
-    let { text } = dataToDisplay[Math.floor(Math.random() * dataToDisplay.length)];
+    // Get the text from the request
+    let { text } = req.params;
 
-    // Initialize the array of splitted lines
-    const splittedLines = [];
+    let lines = text.split('\n');
 
-    // Split the lines who exceeds the max line length
-    text.split('\n').forEach((line) => {
-      while (line.length > maxLineLength) {
-        let pos = line.substring(0, maxLineLength).lastIndexOf(' ');
-        pos = pos <= 0 ? maxLineLength : pos;
+    // Initialize the dichotomy
+    const dichotomy = {
+      min: 0,
+      max: getLongestLineLength(lines),
+      maxFontSize: computeFontSize(lines),
+      lines,
+    };
 
-        splittedLines.push(line.substring(0, pos));
+    // Start the dichotomy
+    do {
+      // Compute the new max line length
+      const newMaxLineLength = Math.floor((dichotomy.min + dichotomy.max) / 2);
 
-        let i = line.indexOf(' ', pos) + 1;
-        if (i < pos || i > pos + maxLineLength) {
-          i = pos;
+      // Split the lines
+      const splittedLines = splitLines(text, newMaxLineLength);
+
+      // Compute the new font size
+      const newFontSize = computeFontSize(splittedLines.join('\n'));
+
+      // Update the dichotomy
+      if (newFontSize > dichotomy.maxFontSize) {
+        dichotomy.maxFontSize = newFontSize;
+        dichotomy.lines = splittedLines;
+
+        // Set the font size
+        context.font = getFont(dichotomy.maxFontSize);
+
+        // Get the size details of the text
+        const textDetails = context.measureText(splittedLines.join('\n'));
+
+        // Compute line height
+        const lineHeight = computeLineHeight(splittedLines, textDetails);
+
+        if (
+          canvasHeight - textDetails.actualBoundingBoxDescent + textDetails.actualBoundingBoxAscent >
+          lineHeight * 2
+        ) {
+          dichotomy.max = newMaxLineLength;
+        } else {
+          dichotomy.min = newMaxLineLength;
         }
-        line = line.substring(i);
+      } else {
+        dichotomy.max = newMaxLineLength;
       }
+    } while (dichotomy.max - dichotomy.min > 1);
 
-      splittedLines.push(line);
-    });
+    // Set the font size
+    context.font = getFont(dichotomy.maxFontSize);
 
-    // Join the lines with a line break
-    text = splittedLines.join('\n');
+    // Get the lines
+    lines = dichotomy.lines;
 
-    // Set the default font and font size
-    context.font = getFont();
-
-    // Calculate the width of the text
-    let { width: textWidth, actualBoundingBoxDescent, actualBoundingBoxAscent } = context.measureText(text);
-
-    // Initialize the font size
-    let fontSize = maxFontSize;
-
-    // Decrease the font size until the text fits the canvas
-    while (textWidth > canvasWidth || actualBoundingBoxDescent + actualBoundingBoxAscent > canvasHeight) {
-      fontSize -= 1;
-      context.font = getFont(fontSize);
-      ({ width: textWidth, actualBoundingBoxDescent, actualBoundingBoxAscent } = context.measureText(text));
-    }
+    // Join the lines
+    text = lines.join('\n');
 
     // Get the size details of the text
     const textDetails = context.measureText(text);
 
-    // Split the text into lines
-    const lines = text.split('\n');
-
-    // Calculate the line height
-    const multiplier = ratios[lines.length] || 0.7 / lines.length ** 1.5 + 1;
-    const lineHeight =
-      ((textDetails.actualBoundingBoxDescent + textDetails.actualBoundingBoxAscent) / lines.length) * multiplier;
+    // Compute line height
+    const lineHeight = computeLineHeight(lines, textDetails);
 
     // Calculate the y position of the text
     let y = (canvasHeight - textDetails.actualBoundingBoxDescent + textDetails.actualBoundingBoxAscent) / 2;
@@ -179,7 +259,7 @@ app.get('/review', async (req, res) => {
 
       // Draw the text
       line.split(' ').forEach((word) => {
-        x += drawWord(context, word, x, y, fontSize);
+        x += drawWord(context, word, x, y, dichotomy.maxFontSize);
       });
 
       // Increment the y position
